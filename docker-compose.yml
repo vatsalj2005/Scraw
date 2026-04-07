@@ -1,0 +1,26 @@
+version: "3.8"
+services:
+  backend:
+    build: 
+      context: .
+      dockerfile: ./apps/backend/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./apps/backend:/app/apps/backend
+      - ./packages:/app/packages
+
+  frontend:
+    build:
+      context: .
+      dockerfile: ./apps/frontend/Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/frontend:/app/apps/frontend
+      - ./packages:/app/packages
+    environment:
+      - VITE_WS_URL=ws://127.0.0.1:8080
+    command: npm run dev -- --host

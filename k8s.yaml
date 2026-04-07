@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scraw-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: scraw-backend
+  template:
+    metadata:
+      labels:
+        app: scraw-backend
+    spec:
+      containers:
+      - name: backend
+        image: scraw-backend:latest
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-ws-service
+spec:
+  selector:
+    app: scraw-backend
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ws-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/websocket-services: "backend-ws-service"
+    nginx.ingress.kubernetes.io/upstream-hash-by: "$arg_roomId"
+spec:
+  rules:
+  - host: scraw.local
+    http:
+      paths:
+      - path: /ws
+        pathType: Prefix
+        backend:
+          service:
+            name: backend-ws-service
+            port: 
+              number: 8080
