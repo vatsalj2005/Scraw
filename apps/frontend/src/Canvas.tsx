@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useStore } from './store';
 import { MsgType } from '@scraw/shared';
 
+const VIRTUAL_SIZE = 2000;
+
 export const Canvas = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const roomId = useStore(state => state.roomId);
@@ -46,7 +48,7 @@ export const Canvas = () => {
     let animationFrameId: number;
     let remotePos = { x: 0, y: 0 };
     let remoteColor = '#fff';
-    let remoteWidth = 5;
+    let remoteWidth = 10;
     
     const renderLoop = () => {
       const state = useStore.getState();
@@ -58,23 +60,32 @@ export const Canvas = () => {
             remoteColor = msg[3];
             remoteWidth = msg[4];
             
+            const lx = (remotePos.x / VIRTUAL_SIZE) * canvas.width;
+            const ly = (remotePos.y / VIRTUAL_SIZE) * canvas.height;
+
             ctx.strokeStyle = remoteColor;
-            ctx.lineWidth = remoteWidth;
+            ctx.lineWidth = (remoteWidth / VIRTUAL_SIZE) * canvas.width;
             ctx.beginPath();
-            ctx.moveTo(remotePos.x, remotePos.y);
-            ctx.lineTo(remotePos.x, remotePos.y);
+            ctx.moveTo(lx, ly);
+            ctx.lineTo(lx, ly);
             ctx.stroke();
         } else if (msg[0] === MsgType.DRAW_MOVE) {
             const deltas = msg[1] as number[];
             if (deltas.length > 0) {
               ctx.strokeStyle = remoteColor;
-              ctx.lineWidth = remoteWidth;
+              ctx.lineWidth = (remoteWidth / VIRTUAL_SIZE) * canvas.width;
+              
+              let lx1 = (remotePos.x / VIRTUAL_SIZE) * canvas.width;
+              let ly1 = (remotePos.y / VIRTUAL_SIZE) * canvas.height;
+              
               ctx.beginPath();
-              ctx.moveTo(remotePos.x, remotePos.y);
+              ctx.moveTo(lx1, ly1);
               for (let i = 0; i < deltas.length; i += 2) {
                   remotePos.x += deltas[i];
                   remotePos.y += deltas[i+1];
-                  ctx.lineTo(remotePos.x, remotePos.y);
+                  const lx2 = (remotePos.x / VIRTUAL_SIZE) * canvas.width;
+                  const ly2 = (remotePos.y / VIRTUAL_SIZE) * canvas.height;
+                  ctx.lineTo(lx2, ly2);
               }
               ctx.stroke();
             }
