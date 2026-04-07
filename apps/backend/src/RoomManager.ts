@@ -66,9 +66,9 @@ export class RoomManager {
     room.players.set(playerId, { id: playerId, ws, score: 0 });
     this.playerRooms.set(ws, room);
 
-    // Send history
-    for(const stroke of room.strokesBuffer) {
-        ws.send(JSON.stringify(stroke));
+    // Send history as a single batch (Snapshot sync)
+    if (room.strokesBuffer.length > 0) {
+        ws.send(JSON.stringify([MsgType.SYNC, room.strokesBuffer]));
     }
 
     // Broadcast new player list

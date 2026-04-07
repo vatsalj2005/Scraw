@@ -39,7 +39,12 @@ export const useStore = create<DrawState>((set, get) => ({
     
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-      if (msg[0] >= MsgType.DRAW_START && msg[0] <= MsgType.DRAW_END) {
+      const type = msg[0];
+      
+      if (type === MsgType.SYNC) {
+          const history = msg[1] as any[][];
+          get().remoteStrokesQueue.push(...history);
+      } else if (type >= MsgType.DRAW_START && type <= MsgType.DRAW_END) {
         get().remoteStrokesQueue.push(msg);
       }
     };

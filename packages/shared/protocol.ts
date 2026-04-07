@@ -7,5 +7,6 @@ export enum MsgType {
   DRAW_END = 5,
   GUESS = 6,
   CORRECT_GUESS = 7,
-  ROUND_END = 8
+  ROUND_END = 8,
+  SYNC = 9
 }
