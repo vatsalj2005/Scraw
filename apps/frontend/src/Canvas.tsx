@@ -95,8 +95,14 @@ export const Canvas = () => {
   }, [size, roomId]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    
     isDrawing.current = true;
-    lastPos.current = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
+    lastPos.current = { 
+      x: e.clientX - rect.left, 
+      y: e.clientY - rect.top 
+    };
     
     const ctx = ctxRef.current;
     if (ctx) {
@@ -111,10 +117,11 @@ export const Canvas = () => {
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDrawing.current) return;
+    if (!isDrawing.current || !canvasRef.current) return;
     
-    const x = e.nativeEvent.offsetX;
-    const y = e.nativeEvent.offsetY;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
     
     const ctx = ctxRef.current;
     if (ctx) {

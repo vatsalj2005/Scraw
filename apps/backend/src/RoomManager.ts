@@ -63,8 +63,13 @@ export class RoomManager {
     const pList = Array.from(room.players.keys());
     this.broadcastToRoom(room, [MsgType.PLAYER_LIST, pList]);
 
-    // Room state is kept in memory even if players.size === 0 
-    // for persistence during the current server session.
+    if (room.players.size === 0) {
+      console.log(`[ROOM] Room empty, cleaning up: ${room.roomId}`);
+      this.rooms.delete(room.roomId);
+      if (this.redis) {
+          this.redis.del(`room:${room.roomId}:strokes`).catch(() => {});
+      }
+    }
   }
 
   private async joinRoom(ws: WebSocket, roomId: string, playerId: string) {
