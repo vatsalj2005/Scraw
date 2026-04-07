@@ -17,10 +17,16 @@ export const Canvas = () => {
   useEffect(() => {
     const onResize = () => {
       if (canvasRef.current?.parentElement) {
-        setSize({
-          w: canvasRef.current.parentElement.clientWidth,
-          h: canvasRef.current.parentElement.clientHeight
-        });
+        const p = canvasRef.current.parentElement;
+        let w = p.clientWidth;
+        let h = w * (9 / 16);
+        
+        // If 16:9 is too tall for container
+        if (h > p.clientHeight) {
+            h = p.clientHeight;
+            w = h * (16 / 9);
+        }
+        setSize({ w, h });
       }
     };
     onResize();
@@ -46,45 +52,53 @@ export const Canvas = () => {
     ctxRef.current = ctx;
 
     let animationFrameId: number;
-    let remotePos = { x: 0, y: 0 };
-    let remoteColor = '#fff';
-    let remoteWidth = 10;
+    
+    // Per-player tracking for smooth multi-user drawing
+    const remoteStates = new Map<string, { x: number, y: number, color: string, width: number }>();
     
     const renderLoop = () => {
       const state = useStore.getState();
       const queue = state.remoteStrokesQueue;
       while (queue.length > 0) {
         const msg = queue.shift();
-        if (msg[0] === MsgType.DRAW_START) {
-            remotePos = { x: msg[1], y: msg[2] };
-            remoteColor = msg[3];
-            remoteWidth = msg[4];
-            
-            const lx = (remotePos.x / VIRTUAL_SIZE) * canvas.width;
-            const ly = (remotePos.y / VIRTUAL_SIZE) * canvas.height;
+        const type = msg[0];
+        const playerId = msg[msg.length - 1]; // Sender ID is always last
 
-            ctx.strokeStyle = remoteColor;
-            ctx.lineWidth = (remoteWidth / VIRTUAL_SIZE) * canvas.width;
+        if (type === MsgType.DRAW_START) {
+            const x = msg[1];
+            const y = msg[2];
+            const color = msg[3];
+            const width = msg[4];
+            
+            remoteStates.set(playerId, { x, y, color, width });
+
+            const lx = (x / VIRTUAL_SIZE) * canvas.width;
+            const ly = (y / VIRTUAL_SIZE) * canvas.height;
+
+            ctx.strokeStyle = color;
+            ctx.lineWidth = (width / VIRTUAL_SIZE) * canvas.width;
             ctx.beginPath();
             ctx.moveTo(lx, ly);
             ctx.lineTo(lx, ly);
             ctx.stroke();
-        } else if (msg[0] === MsgType.DRAW_MOVE) {
+        } else if (type === MsgType.DRAW_MOVE) {
             const deltas = msg[1] as number[];
-            if (deltas.length > 0) {
-              ctx.strokeStyle = remoteColor;
-              ctx.lineWidth = (remoteWidth / VIRTUAL_SIZE) * canvas.width;
+            const pState = remoteStates.get(playerId);
+            
+            if (pState && deltas.length > 0) {
+              ctx.strokeStyle = pState.color;
+              ctx.lineWidth = (pState.width / VIRTUAL_SIZE) * canvas.width;
               
-              let lx1 = (remotePos.x / VIRTUAL_SIZE) * canvas.width;
-              let ly1 = (remotePos.y / VIRTUAL_SIZE) * canvas.height;
+              let lx1 = (pState.x / VIRTUAL_SIZE) * canvas.width;
+              let ly1 = (pState.y / VIRTUAL_SIZE) * canvas.height;
               
               ctx.beginPath();
               ctx.moveTo(lx1, ly1);
               for (let i = 0; i < deltas.length; i += 2) {
-                  remotePos.x += deltas[i];
-                  remotePos.y += deltas[i+1];
-                  const lx2 = (remotePos.x / VIRTUAL_SIZE) * canvas.width;
-                  const ly2 = (remotePos.y / VIRTUAL_SIZE) * canvas.height;
+                  pState.x += deltas[i];
+                  pState.y += deltas[i+1];
+                  const lx2 = (pState.x / VIRTUAL_SIZE) * canvas.width;
+                  const ly2 = (pState.y / VIRTUAL_SIZE) * canvas.height;
                   ctx.lineTo(lx2, ly2);
               }
               ctx.stroke();

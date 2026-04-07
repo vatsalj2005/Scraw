@@ -106,6 +106,18 @@ export class RoomManager {
     const room = this.playerRooms.get(ws);
     if (!room) return;
     
+    // Find sender ID
+    let senderId = "unknown";
+    for(const [id, player] of room.players.entries()) {
+        if (player.ws === ws) {
+            senderId = id;
+            break;
+        }
+    }
+
+    // Append senderId to msg: [Type, ..., playerId]
+    msg.push(senderId);
+    
     room.strokesBuffer.push(msg);
 
     // Persist to Redis (Fire and forget, but handled asynchronously)
