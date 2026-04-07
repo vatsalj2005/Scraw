@@ -57,6 +57,7 @@ export class RoomManager {
   private joinRoom(ws: WebSocket, roomId: string, playerId: string) {
     let room = this.rooms.get(roomId);
     if (!room) {
+      console.log(`[ROOM] Creating new room: ${roomId}`);
       room = { roomId, players: new Map(), currentDrawer: null, word: null, strokesBuffer: [] };
       this.rooms.set(roomId, room);
     }
@@ -68,7 +69,10 @@ export class RoomManager {
 
     // Send history as a single batch (Snapshot sync)
     if (room.strokesBuffer.length > 0) {
+        console.log(`[SYNC] Sending ${room.strokesBuffer.length} strokes to player ${playerId} in room ${roomId}`);
         ws.send(JSON.stringify([MsgType.SYNC, room.strokesBuffer]));
+    } else {
+        console.log(`[SYNC] New player ${playerId} joined empty room ${roomId}`);
     }
 
     // Broadcast new player list

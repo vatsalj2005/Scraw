@@ -16,7 +16,19 @@ const server = createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 const roomManager = new RoomManager();
 
-wss.on('connection', (ws: WebSocket, req) => {
+// Heartbeat to keep connections alive on cloud providers (Railway/Render)
+const interval = setInterval(() => {
+  wss.clients.forEach((ws: any) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('connection', (ws: any, req) => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  
   console.log(`New connection from ${req.socket.remoteAddress}`);
   
   ws.on('message', (data: Buffer) => {
@@ -29,11 +41,11 @@ wss.on('connection', (ws: WebSocket, req) => {
     }
   });
 
-  ws.on('error', (err) => {
+  ws.on('error', (err: Error) => {
     console.error("WS Socket Error:", err);
   });
 
-  ws.on('close', (code, reason) => {
+  ws.on('close', (code: number, reason: string) => {
     console.log(`Connection closed: ${code} ${reason}`);
     roomManager.handleDisconnect(ws);
   });
