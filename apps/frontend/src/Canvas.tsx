@@ -36,10 +36,9 @@ export const Canvas = () => {
     const dpr = window.devicePixelRatio || 1;
     canvas.width = size.w * dpr;
     canvas.height = size.h * dpr;
-    ctx.scale(dpr, dpr);
     
     // Wipe and reset styles
-    ctx.clearRect(0, 0, size.w, size.h);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctxRef.current = ctx;
@@ -94,35 +93,39 @@ export const Canvas = () => {
     return () => cancelAnimationFrame(animationFrameId);
   }, [size, roomId]);
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (!canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
+  const getCoordinates = (e: React.PointerEvent) => {
+    if (!canvasRef.current) return { x: 0, y: 0 };
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
     
+    // This formula is foolproof: (MousePos - ElementOffset) * (InternalPixels / CSSPixels)
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    
+    return { x, y };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    const { x, y } = getCoordinates(e);
     isDrawing.current = true;
-    lastPos.current = { 
-      x: e.clientX - rect.left, 
-      y: e.clientY - rect.top 
-    };
+    lastPos.current = { x, y };
     
     const ctx = ctxRef.current;
     if (ctx) {
         ctx.strokeStyle = '#ff0055';
-        ctx.lineWidth = 5;
+        ctx.lineWidth = 10; // Slightly larger for better visibility
         ctx.beginPath();
-        ctx.moveTo(lastPos.current.x, lastPos.current.y);
-        ctx.lineTo(lastPos.current.x, lastPos.current.y);
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y);
         ctx.stroke();
     }
-    useStore.getState().sendBatch([MsgType.DRAW_START, lastPos.current.x, lastPos.current.y, '#ff0055', 5]);
+    useStore.getState().sendBatch([MsgType.DRAW_START, x, y, '#ff0055', 10]);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDrawing.current || !canvasRef.current) return;
+    if (!isDrawing.current) return;
     
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
+    const { x, y } = getCoordinates(e);
     const ctx = ctxRef.current;
     if (ctx) {
         ctx.beginPath();
@@ -146,7 +149,14 @@ export const Canvas = () => {
       onPointerDown={handlePointerDown} 
       onPointerMove={handlePointerMove} 
       onPointerUp={() => isDrawing.current = false}
-      style={{ display: 'block', background: '#1c1c1c', cursor: 'crosshair', touchAction: 'none' }}
+      style={{ 
+        display: 'block', 
+        background: '#1c1c1c', 
+        cursor: 'crosshair', 
+        touchAction: 'none',
+        width: `${size.w}px`,
+        height: `${size.h}px`
+      }}
     />
   );
 };
