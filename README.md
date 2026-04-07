@@ -1,104 +1,92 @@
 # Scraw 🖌️
 
-A high-performance, real-time multiplayer drawing and guessing game MVP built with a focus on ultra-low latency and production-grade architecture.
+A high-performance, **zero-downtime** real-time multiplayer drawing board. Built with a **Stateless Architecture** and **Unified 1080p Coordinate Grid** to guarantee pixel-perfect synchronization across any device—from mobile phones to 4K monitors.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![React](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61dafb)
 ![Node](https://img.shields.io/badge/backend-Node.js%20%2B%20WS-339933)
-![Latency](https://img.shields.io/badge/latency-%3C50ms-brightgreen)
-
-## 🚀 Overview
-
-Scraw is a scalable, "Scribble.io-style" multiplayer application. Unlike standard drawing apps, Scraw is architected like a distributed system to ensure that mouse strokes are propagated to all participants in less than 50ms, creating a "zero-lag" drawing experience.
-
-### Key Features
-- **Ultra-Low Latency**: Uses delta-encoding and frame-batching to minimize network overhead.
-- **Persistent Room State**: Drawings stay in the room even if all users disconnect.
-- **Optimistic Rendering**: Local strokes are rendered instantly while remote strokes are interpolated.
-- **Production Ready**: Fully Dockerized and Kubernetes-ready (handles sticky sessions/consistent hashing).
+![State](https://img.shields.io/badge/state-Redis-red)
+![Architecture](https://img.shields.io/badge/architecture-Monorepo%20%2B%20Web%20Engine-orange)
 
 ---
 
-## 🏗️ Architecture
+## 🚀 Key Features
 
-The project is organized as a Modern Monorepo using `npm workspaces`:
+- **Pixel-Perfect Sync**: Uses a fixed internal **1920x1080 Virtual Resolution**. Whether you're on a phone or ultra-wide monitor, every stroke aligns perfectly.
+- **High Availability (HA)**: Stateless backend design. If a server pod restarts or hot-reloads, the drawing board recovers instantly.
+- **Redis Persistence**: Every stroke is persisted to Redis. Rooms maintain history even if the server is wiped or updated.
+- **Ultra-Low Latency**: Custom binary-efficient JSON protocol using **Delta-Encoding** to minimize network packets.
+- **Smart Room Management**: Automatic room creation and cleanup. When the last player leaves, the room and its Redis history are wiped.
 
-```text
-/apps
-  /frontend     # React (Vite) + Canvas API + Zustand
-  /backend      # Node.js + WebSocket (ws) + Room Manager
-/packages
-  /shared       # Shared types, MsgTypes, and Protocol definitions
-```
+---
 
-### Protocol Efficiency
-Scraw uses a **Tuple-based JSON Protocol** to strip away redundant keys and minimize packet size:
-- **Draw Event**: `[MsgType.DRAW_MOVE, [dx1, dy1, dx2, dy2, ...]]`
-- This ensures that hundreds of points per second don't saturate the TCP buffer.
+## 🏗️ Architecture & Protocol
+
+### 1. Unified Resolve Grid
+Scraw doesn't communicate in screen pixels. It uses an internal **1080p virtual canvas**.
+- **Input Scaling**: Mouse coordinates are mapped: `(MousePos / CSSSize) * 1920`.
+- **Output Scaling**: Received coordinates are mapped: `(InternalPos / 1920) * LocalScreenSize`.
+*This eliminates all "Shifting" or "Stretching" bugs typical in many multiplayer canvas apps.*
+
+### 2. Multi-User Delta Engine
+Strokes are batched and sent as deltas (`dx`, `dy`) rather than absolute points. Each packet includes a `playerId` to prevent line-contamination between concurrent drawers. 
+
+### 3. Stateless Room Lifecycle
+- **Stateless Backend**: Backend replicas handle logic but keep long-term state in **Redis**.
+- **Sync Snapshots**: Late-joiners receive a single **SYNC** packet containing the entire board history as a single burst, preventing frame-drop during room entry.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: React 18, Vite 8, Zustand (State), Native Canvas API.
-- **Backend**: Node.js, `ws` (WebSocket Library), `ts-node-dev`.
-- **Infrastructure**: Docker, Docker Compose, Kubernetes (Ingress NGINX).
+- **Frontend**: React 18, Vite, Zustand, HTML5 Canvas API.
+- **Backend**: Node.js, `ws` (WebSockets), `ioredis`.
+- **Packages**: Shared TypeScript monorepo for protocol typing.
+- **Hosting**: Recommended **Vercel** (Frontend) + **Railway/Render** (Backend + Redis).
 
 ---
 
 ## 💻 Local Development
 
-### Prerequisites
-- Node.js 20+
-- Docker Desktop (Optional, for containerized dev)
-
-### Setup
-1. Clone the repository and install dependencies:
+1. **Install Dependencies**:
    ```bash
    npm install
    ```
 
-2. Start the dev environment locally:
+2. **Start with Docker (Recommended for Redis)**:
    ```bash
-   # Terminal 1: Backend
-   npm run dev --workspace=backend
+   docker-compose up --build
+   ```
+   *Frontend: http://localhost:5173 | Backend: http://localhost:8080*
 
+3. **Start Manually**:
+   ```bash
+   # Terminal 1: Backend (Needs REDIS_URL)
+   npm run dev --workspace=backend
+   
    # Terminal 2: Frontend
    npm run dev --workspace=frontend
    ```
-   *Frontend loads at: http://localhost:5173*
-
-### Running with Docker
-```bash
-docker-compose up --build
-```
 
 ---
 
-## 🚢 Deployment
+## 🚢 Production Deployment
 
-Scraw uses a **Hybrid Deployment Strategy**:
+### 1. Redis (Railway/Managed)
+Deploy a Redis instance and copy the `REDIS_URL`.
 
-1. **Frontend (Vercel)**:
-   - Deploy `apps/frontend`.
-   - Set `VITE_WS_URL` env variable to your backend's `wss://` URI.
-   - Enable "Include Source Files from Outside the Root Directory".
+### 2. Backend (Railway/Render)
+- Deploy the monorepo root.
+- Set **Health Check Path** to `/health`.
+- Set Environment Variable: `REDIS_URL` = (Your Redis URL).
+- Set Environment Variable: `PORT` = `8080`.
 
-2. **Backend (Railway / Render / Fly.io)**:
-   - Deploy the monorepo root.
-   - Set start command to `npm install && npm run start --workspace=backend`.
-   - Expose port `8080`.
-
----
-
-## ⚡ Performance Optimization Tips
-
-- **Canvas Scaling**: The engine automatically handles `DevicePixelRatio` for high-DPI (Retina) screens.
-- **Interpolation**: Remote strokes use a `requestAnimationFrame` queue to smooth out network jitter.
-- **Stateless Backend**: While the rooms are in-memory for speed, the RoomManager is designed to be easily backed by Redis if horizontal scaling is required.
+### 3. Frontend (Vercel)
+- **Root Directory**: `apps/frontend`.
+- **Build Command**: `cd ../.. && npm install && npm run build --workspace=frontend`.
+- **Environment Variable**: `VITE_WS_URL` = `wss://your-backend-url.com`.
+- Enable "Include source files from outside root directory" in Vercel settings.
 
 ---
 
 ## 📜 License
-
-MIT License. Designed with ❤️ for realtime graphics specialists.
+MIT. Built with ❤️ for the real-time graphics community.
