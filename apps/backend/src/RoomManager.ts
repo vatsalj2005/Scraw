@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import { MsgType } from '@scraw/shared';
+import Redis from 'ioredis';
 
 interface Player {
   id: string;
@@ -18,6 +19,18 @@ interface RoomState {
 export class RoomManager {
   private rooms = new Map<string, RoomState>();
   private playerRooms = new WeakMap<WebSocket, RoomState>();
+  private redis: Redis | null = null;
+
+  constructor() {
+    const redisUrl = process.env.REDIS_URL;
+    if (redisUrl) {
+      console.log(`[REDIS] Connecting to: ${redisUrl}`);
+      this.redis = new Redis(redisUrl);
+      this.redis.on('error', (err: any) => console.error('[REDIS] Connection Error:', err));
+    } else {
+      console.warn('[REDIS] No REDIS_URL provided. Drawings will be lost on server restart.');
+    }
+  }
 
   handleMessage(ws: WebSocket, type: number, msg: any[]) {
     switch (type) {
@@ -54,12 +67,18 @@ export class RoomManager {
     // for persistence during the current server session.
   }
 
-  private joinRoom(ws: WebSocket, roomId: string, playerId: string) {
+  private async joinRoom(ws: WebSocket, roomId: string, playerId: string) {
     let room = this.rooms.get(roomId);
     if (!room) {
-      console.log(`[ROOM] Creating new room: ${roomId}`);
+      console.log(`[ROOM] Creating/Loading room: ${roomId}`);
       room = { roomId, players: new Map(), currentDrawer: null, word: null, strokesBuffer: [] };
       this.rooms.set(roomId, room);
+      
+      // Load from Redis if it's a "new" room object but data might exist
+      if (this.redis) {
+          const history = await this.redis.lrange(`room:${roomId}:strokes`, 0, -1);
+          room.strokesBuffer = history.map(s => JSON.parse(s));
+      }
     }
     
     if (room.players.size >= 10) return; // Full
@@ -69,10 +88,8 @@ export class RoomManager {
 
     // Send history as a single batch (Snapshot sync)
     if (room.strokesBuffer.length > 0) {
-        console.log(`[SYNC] Sending ${room.strokesBuffer.length} strokes to player ${playerId} in room ${roomId}`);
+        console.log(`[SYNC] Sending ${room.strokesBuffer.length} strokes to player ${playerId} from Redis/Cache`);
         ws.send(JSON.stringify([MsgType.SYNC, room.strokesBuffer]));
-    } else {
-        console.log(`[SYNC] New player ${playerId} joined empty room ${roomId}`);
     }
 
     // Broadcast new player list
@@ -85,6 +102,12 @@ export class RoomManager {
     if (!room) return;
     
     room.strokesBuffer.push(msg);
+
+    // Persist to Redis (Fire and forget, but handled asynchronously)
+    if (this.redis) {
+        this.redis.rpush(`room:${room.roomId}:strokes`, JSON.stringify(msg))
+            .catch(err => console.error('[REDIS] Write Error:', err));
+    }
 
     const out = JSON.stringify(msg);
     for (const player of room.players.values()) {
