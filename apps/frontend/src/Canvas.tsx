@@ -28,31 +28,39 @@ export const Canvas = () => {
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d');
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Handle high-DPI scaling (Retina displays)
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size.w * dpr;
+    canvas.height = size.h * dpr;
+    ctx.scale(dpr, dpr);
     
-    // Wipe canvas for the new room
+    // Wipe and reset styles
     ctx.clearRect(0, 0, size.w, size.h);
-    
-    ctxRef.current = ctx;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = '#fff';
+    ctxRef.current = ctx;
 
     let animationFrameId: number;
     let remotePos = { x: 0, y: 0 };
+    let remoteColor = '#fff';
+    let remoteWidth = 5;
     
     const renderLoop = () => {
-      // Access store directly to avoid stale closures in the loop
       const state = useStore.getState();
       const queue = state.remoteStrokesQueue;
       while (queue.length > 0) {
         const msg = queue.shift();
         if (msg[0] === MsgType.DRAW_START) {
             remotePos = { x: msg[1], y: msg[2] };
-            ctx.strokeStyle = msg[3];
-            ctx.lineWidth = msg[4];
+            remoteColor = msg[3];
+            remoteWidth = msg[4];
+            
+            ctx.strokeStyle = remoteColor;
+            ctx.lineWidth = remoteWidth;
             ctx.beginPath();
             ctx.moveTo(remotePos.x, remotePos.y);
             ctx.lineTo(remotePos.x, remotePos.y);
@@ -60,6 +68,8 @@ export const Canvas = () => {
         } else if (msg[0] === MsgType.DRAW_MOVE) {
             const deltas = msg[1] as number[];
             if (deltas.length > 0) {
+              ctx.strokeStyle = remoteColor;
+              ctx.lineWidth = remoteWidth;
               ctx.beginPath();
               ctx.moveTo(remotePos.x, remotePos.y);
               for (let i = 0; i < deltas.length; i += 2) {
