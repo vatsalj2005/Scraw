@@ -8,25 +8,27 @@ export const Canvas = () => {
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isDrawing = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
-  const localBatch = useRef<number[]>([]);
 
-  // Internal resolution constant (16:9)
-  const INTERNAL_W = 1920;
-  const INTERNAL_H = 1080;
+  // Fixed canvas size - same for all devices
+  const CANVAS_W = 1200;
+  const CANVAS_H = 700;
 
   const getCoordinates = (e: React.PointerEvent) => {
     if (!canvasRef.current) return { x: 0, y: 0 };
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
     
-    // (MousePos - ElementOffset) * (InternalPixels / DisplayedCSSPixels)
-    const x = (e.clientX - rect.left) * (INTERNAL_W / rect.width);
-    const y = (e.clientY - rect.top) * (INTERNAL_H / rect.height);
+    const clientX = e.clientX - rect.left;
+    const clientY = e.clientY - rect.top;
+    
+    const x = (clientX / rect.width) * CANVAS_W;
+    const y = (clientY / rect.height) * CANVAS_H;
     
     return { x, y };
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
     const { x, y } = getCoordinates(e);
     isDrawing.current = true;
     lastPos.current = { x, y };
@@ -34,32 +36,30 @@ export const Canvas = () => {
     const ctx = ctxRef.current;
     if (ctx) {
         ctx.strokeStyle = '#ff0055';
-        ctx.lineWidth = 10;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(x, y);
-        ctx.lineTo(x, y);
-        ctx.stroke();
     }
-    useStore.getState().sendBatch([MsgType.DRAW_START, x, y, '#ff0055', 10]);
+    useStore.getState().sendBatch([MsgType.DRAW_START, x, y, '#ff0055', 3]);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!isDrawing.current) return;
+    e.preventDefault();
     
     const { x, y } = getCoordinates(e);
     const ctx = ctxRef.current;
     if (ctx) {
-        ctx.beginPath();
-        ctx.moveTo(lastPos.current.x, lastPos.current.y);
         ctx.lineTo(x, y);
         ctx.stroke();
     }
 
-    const dx = x - lastPos.current.x;
-    const dy = y - lastPos.current.y;
-    localBatch.current.push(dx, dy);
-
     lastPos.current = { x, y };
+    useStore.getState().sendBatch([MsgType.DRAW_MOVE, x, y]);
+  };
+
+  const handlePointerEnd = () => {
+    isDrawing.current = false;
   };
 
   useEffect(() => {
@@ -68,11 +68,11 @@ export const Canvas = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Fixed Internal resolution guarantees perfect cross-device sync
-    canvas.width = INTERNAL_W;
-    canvas.height = INTERNAL_H;
+    // Fixed canvas resolution
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
     
-    ctx.clearRect(0, 0, INTERNAL_W, INTERNAL_H);
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctxRef.current = ctx;
@@ -99,29 +99,19 @@ export const Canvas = () => {
             ctx.lineWidth = width;
             ctx.beginPath();
             ctx.moveTo(x, y);
-            ctx.lineTo(x, y);
-            ctx.stroke();
         } else if (type === MsgType.DRAW_MOVE) {
-            const deltas = msg[1] as number[];
+            const x = msg[1];
+            const y = msg[2];
             const pState = remoteStates.get(playerId);
-            if (pState && deltas.length > 0) {
+            if (pState) {
               ctx.strokeStyle = pState.color;
               ctx.lineWidth = pState.width;
-              ctx.beginPath();
-              ctx.moveTo(pState.x, pState.y);
-              for (let i = 0; i < deltas.length; i += 2) {
-                  pState.x += deltas[i];
-                  pState.y += deltas[i+1];
-                  ctx.lineTo(pState.x, pState.y);
-              }
+              ctx.lineTo(x, y);
               ctx.stroke();
+              pState.x = x;
+              pState.y = y;
             }
         }
-      }
-
-      if (localBatch.current.length > 0) {
-        useStore.getState().sendBatch([MsgType.DRAW_MOVE, localBatch.current]);
-        localBatch.current = [];
       }
 
       animationFrameId = requestAnimationFrame(renderLoop);
@@ -132,21 +122,34 @@ export const Canvas = () => {
   }, [roomId]);
 
   return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', background: '#0a0a0a' }}>
+    <div style={{ 
+      width: '100%', 
+      height: '100%', 
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      background: '#0a0a0a',
+      overflow: 'auto',
+      padding: '20px'
+    }}>
       <canvas 
         ref={canvasRef} 
         onPointerDown={handlePointerDown} 
         onPointerMove={handlePointerMove} 
-        onPointerUp={() => isDrawing.current = false}
-        onPointerLeave={() => isDrawing.current = false}
+        onPointerUp={handlePointerEnd}
+        onPointerLeave={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
         style={{ 
-          maxWidth: '100%', 
-          maxHeight: '100%', 
-          aspectRatio: '16/9',
+          width: `${CANVAS_W}px`,
+          height: `${CANVAS_H}px`,
+          maxWidth: '100%',
+          maxHeight: '100%',
           background: '#1c1c1c', 
           cursor: 'crosshair', 
           touchAction: 'none',
-          boxShadow: '0 0 40px rgba(0,0,0,0.5)'
+          boxShadow: '0 0 40px rgba(0,0,0,0.5)',
+          display: 'block',
+          border: '2px solid #333'
         }}
       />
     </div>

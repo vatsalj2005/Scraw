@@ -75,92 +75,90 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed protocol specification.
 
 ---
 
-## 💻 Local Development
+## 💻 Local Development & Multi-Laptop Setup
 
 ### Prerequisites
-- Docker and Docker Compose
-- Node.js 20+ (for local development without Docker)
+- Docker Desktop installed
+- All laptops connected to same WiFi network
 
-### Quick Start
+### Quick Start (Single Laptop)
 
 ```bash
 # Clone repository
 git clone <repo-url>
 cd scraw
 
-# Start all services with Docker
+# Start all services
 docker-compose up --build
 ```
 
-**Services:**
+**Access:**
 - Frontend: http://localhost:5173
-- Gateway: http://localhost:8080 (WebSocket)
-- Replica 1: http://localhost:3001
-- Replica 2: http://localhost:3002
-- Replica 3: http://localhost:3003
+- Gateway: http://localhost:8080
 
-### Development Workflow
+### Multi-Laptop Setup (Same WiFi Network)
 
-1. **Edit replica code:**
-   ```bash
-   # Edit apps/replica/src/server.ts
-   # Nodemon auto-restarts container
-   # System continues operating (zero downtime)
-   ```
+See **[LOCAL_NETWORK_SETUP.md](./LOCAL_NETWORK_SETUP.md)** for detailed instructions.
 
-2. **Monitor logs:**
-   ```bash
-   docker-compose logs -f
-   ```
+**Quick Steps:**
+1. Find host laptop IP address: `ipconfig` (Windows) or `ifconfig` (Mac/Linux)
+2. Update `docker-compose.yml` → `VITE_WS_URL` with your IP
+3. Start containers: `docker-compose up --build`
+4. Access from other laptops: `http://YOUR_IP:5173`
 
-3. **Check replica status:**
-   ```bash
-   curl http://localhost:3001/status | jq
-   curl http://localhost:3002/status | jq
-   curl http://localhost:3003/status | jq
-   ```
+**Example:**
+```yaml
+# In docker-compose.yml
+environment:
+  - VITE_WS_URL=ws://192.168.1.100:8080  # Replace with your IP
+```
 
-4. **Test failover:**
-   ```bash
-   # Kill current leader
-   docker kill scraw-replica1-1
-   
-   # Watch new election
-   docker-compose logs -f replica2 replica3
-   ```
+Then access from any laptop on same WiFi:
+```
+http://192.168.1.100:5173
+```
 
 ---
 
 ## 🧪 Testing
 
-See [TESTING.md](./TESTING.md) for comprehensive test suite including:
-
-- ✅ Multi-client real-time synchronization
-- ✅ Leader failure and automatic failover
-- ✅ Zero-downtime hot reload
-- ✅ Majority quorum enforcement
-- ✅ Log replication consistency
-- ✅ Late joiner sync
-- ✅ Chaos testing (rapid failures)
-- ✅ Network partition recovery
-
-### Quick Test
-
+### Test 1: Multi-Client Drawing (Same Laptop)
 ```bash
-# Terminal 1: Start system
+# Start system
 docker-compose up --build
 
-# Terminal 2: Open multiple browser tabs
-open http://localhost:5173
-open http://localhost:5173
-
+# Open multiple browser tabs
+# Navigate to http://localhost:5173
 # Draw in one tab, observe in others
+```
 
-# Terminal 3: Kill leader
+### Test 2: Leader Failover
+```bash
+# Find current leader
+docker-compose logs | grep "Became LEADER"
+
+# Kill leader
 docker kill scraw-replica1-1
 
-# Continue drawing - system should recover automatically
+# Watch new election
+docker-compose logs -f replica2 replica3
+
+# Continue drawing - system recovers automatically
 ```
+
+### Test 3: Hot Reload
+```bash
+# Edit apps/replica/src/server.ts
+# Save file
+# Watch container auto-restart
+# System continues operating
+```
+
+### Test 4: Multi-Laptop Setup
+See [LOCAL_NETWORK_SETUP.md](./LOCAL_NETWORK_SETUP.md) for:
+- Connecting multiple laptops on same WiFi
+- Accessing from different devices
+- Troubleshooting network issues
 
 ---
 
@@ -180,138 +178,7 @@ docker kill scraw-replica1-1
 - **Throughput:** >500 strokes/second
 - **Failover Time:** <1 second for leader election
 - **Recovery Time:** <2 seconds for replica rejoin
-
----
-
-## 🚢 Production Deployment
-
-### Option 1: Docker Compose (Recommended for Demo/Assignment)
-
-```bash
-docker-compose up -d --build
-```
-
-### Option 2: Cloud Deployment (Vercel + Railway)
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete guide on deploying to:
-- **Frontend:** Vercel (free tier)
-- **Backend:** Railway (free tier)
-
-**Quick Summary:**
-1. Deploy 3 replicas to Railway with environment variables
-2. Deploy gateway to Railway
-3. Deploy frontend to Vercel with `VITE_WS_URL=wss://your-gateway.railway.app`
-4. Update PEERS in replicas with actual Railway URLs
-
-The system works identically in cloud as it does locally!
-
-### Option 3: Manual Deployment
-
-1. **Start Replicas:**
-   ```bash
-   cd apps/replica
-   REPLICA_ID=replica1 PORT=3001 PEERS=replica2:3002,replica3:3003 npm run dev
-   ```
-
-2. **Start Gateway:**
-   ```bash
-   cd apps/gateway
-   PORT=8080 npm run dev
-   ```
-
-3. **Start Frontend:**
-   ```bash
-   cd apps/frontend
-   VITE_WS_URL=ws://localhost:8080 npm run dev
-   ```
-
-### Environment Variables
-
-**Replica:**
-- `REPLICA_ID`: Unique identifier (replica1, replica2, replica3)
-- `PORT`: HTTP port for RPC endpoints
-- `PEERS`: Comma-separated list of peer addresses
-- `GATEWAY_URL`: Gateway commit notification endpoint
-
-**Gateway:**
-- `PORT`: WebSocket server port (default: 8080)
-
-**Frontend:**
-- `VITE_WS_URL`: WebSocket gateway URL
-
----
-
-## 📝 Assignment Compliance
-
-This project fulfills all requirements for the **Distributed Real-Time Drawing Board with Mini-RAFT Consensus** assignment:
-
-### ✅ Required Components
-- [x] Gateway Service (WebSocket server)
-- [x] 3 Replica Nodes with RAFT implementation
-- [x] Follower, Candidate, Leader modes
-- [x] Leader election with term-based voting
-- [x] Log replication with majority quorum
-- [x] Heartbeat mechanism (150ms)
-- [x] RPC endpoints: /request-vote, /append-entries, /sync-log
-- [x] Bind-mounted hot-reload with nodemon
-- [x] Zero-downtime container replacement
-
-### ✅ RAFT Protocol
-- [x] Election timeout: 500-800ms (randomized)
-- [x] Heartbeat interval: 150ms
-- [x] Majority (2/3) quorum for commits
-- [x] Higher term always wins
-- [x] Committed entries never overwritten
-- [x] Catch-up protocol for restarted nodes
-
-### ✅ Fault Tolerance
-- [x] Automatic leader failover
-- [x] System operates with 2/3 replicas
-- [x] Graceful degradation on failures
-- [x] Log consistency across replicas
-
-### ✅ Real-Time Features
-- [x] WebSocket-based drawing
-- [x] Multi-client synchronization
-- [x] Delta-encoded stroke batching
-- [x] Late joiner history sync
-
-### ✅ Docker & Deployment
-- [x] docker-compose.yml with 4 services
-- [x] Bind mounts for hot-reload
-- [x] Shared Docker network
-- [x] Health check endpoints
-- [x] Environment-based configuration
-
----
-
-## 📚 Documentation
-
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - Detailed system design and protocol specification
-- [TESTING.md](./TESTING.md) - Comprehensive testing guide with 9 test scenarios
-- [QUICKSTART.md](./QUICKSTART.md) - 5-minute setup guide
-- [DIAGRAMS.md](./DIAGRAMS.md) - Visual system diagrams and flows
-- [SUBMISSION.md](./SUBMISSION.md) - Assignment submission checklist
-- [CHANGES.md](./CHANGES.md) - Transformation details from original project
-- [PROJECT_SUMMARY.md](./PROJECT_SUMMARY.md) - Complete project overview
-- [k8s.yaml](./k8s.yaml) - Kubernetes deployment configuration (bonus)
-
----
-
-## 🎥 Demo Video Checklist
-
-For the 8-10 minute demonstration:
-
-1. ✅ System startup and leader election
-2. ✅ Multi-tab drawing synchronization
-3. ✅ Kill leader, show automatic failover
-4. ✅ Hot reload replica (edit file → auto-restart)
-5. ✅ Kill 2 replicas, show unavailability
-6. ✅ Restart replica, show recovery
-7. ✅ Query replica status endpoints
-8. ✅ Show consistent logs across replicas
-9. ✅ Late joiner receives full history
-10. ✅ Chaos test (multiple rapid failures)
+- **Network:** Works on WiFi/LAN with multiple devices
 
 ---
 
@@ -342,15 +209,44 @@ docker-compose config
 docker-compose restart
 ```
 
+### Other laptops can't connect
+See [LOCAL_NETWORK_SETUP.md](./LOCAL_NETWORK_SETUP.md) troubleshooting section for:
+- Firewall configuration
+- Network connectivity issues
+- IP address problems
+
 ---
 
-## 🌟 Bonus Features Implemented
+## 📚 Documentation
+
+- [LOCAL_NETWORK_SETUP.md](./LOCAL_NETWORK_SETUP.md) - Multi-laptop setup guide
+- [docker-compose.yml](./docker-compose.yml) - Container configuration
+
+---
+
+## 🎥 Demo Checklist
+
+For assignment demonstration:
+
+1. ✅ System startup and leader election
+2. ✅ Multi-tab drawing synchronization (same laptop)
+3. ✅ Multi-laptop drawing (different devices)
+4. ✅ Kill leader, show automatic failover
+5. ✅ Hot reload replica (edit file → auto-restart)
+6. ✅ Query replica status endpoints
+7. ✅ Show consistent logs across replicas
+
+---
+
+## 🌟 Features Implemented
 
 - ✅ Unified 1080p coordinate grid for pixel-perfect sync
 - ✅ Delta-encoded stroke batching for efficiency
-- ✅ Kubernetes deployment configuration
-- ✅ Comprehensive testing documentation
 - ✅ Real-time multi-user collaboration
+- ✅ RAFT consensus protocol
+- ✅ Automatic leader election
+- ✅ Zero-downtime hot reload
+- ✅ Local network multi-device support
 
 ---
 

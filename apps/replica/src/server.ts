@@ -6,9 +6,6 @@ const PORT = parseInt(process.env.PORT || '3001');
 const PEERS = (process.env.PEERS || '').split(',').filter(p => p && p.trim());
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://gateway:8081';
 
-// Enable CORS for cloud deployment
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
-
 type State = 'FOLLOWER' | 'CANDIDATE' | 'LEADER';
 
 interface LogEntry {
@@ -108,9 +105,9 @@ class RaftNode {
       this.matchIndex.set(peer, 0);
     });
     
-    // Start sending heartbeats
+    // Start sending heartbeats - reduced to 50ms for faster replication
     this.sendHeartbeats();
-    this.heartbeatInterval = setInterval(() => this.sendHeartbeats(), 150);
+    this.heartbeatInterval = setInterval(() => this.sendHeartbeats(), 50);
   }
 
   private stepDown(newTerm: number) {
@@ -147,7 +144,7 @@ class RaftNode {
         prevLogTerm,
         entries,
         leaderCommit: this.commitIndex
-      }, { timeout: 300 });
+      }, { timeout: 150 }); // Reduced timeout for faster replication
 
       if (res.data.success) {
         if (entries.length > 0) {
@@ -192,12 +189,12 @@ class RaftNode {
       this.lastApplied++;
       const entry = this.log[this.lastApplied];
       
-      // Notify gateway of committed stroke
+      // Notify gateway of committed stroke immediately
       try {
         await axios.post(`${GATEWAY_URL}/commit`, {
           roomId: entry.roomId,
           stroke: entry.stroke
-        }, { timeout: 500 });
+        }, { timeout: 200 }); // Reduced timeout for faster response
       } catch (e) {
         console.error(`[${REPLICA_ID}] Failed to notify gateway:`, e);
       }
@@ -287,7 +284,13 @@ class RaftNode {
     this.log.push(entry);
     console.log(`[${REPLICA_ID}] Appended stroke to log (index ${entry.index})`);
     
-    // Immediately replicate
+    // Immediately notify gateway for instant feedback (optimistic update)
+    axios.post(`${GATEWAY_URL}/commit`, {
+      roomId,
+      stroke
+    }, { timeout: 100 }).catch(() => {});
+    
+    // Then replicate to followers
     this.sendHeartbeats();
   }
 
@@ -303,18 +306,6 @@ class RaftNode {
 }
 
 const app = express();
-
-// CORS middleware for cloud deployment
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', CORS_ORIGIN);
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
-
 app.use(express.json());
 
 const node = new RaftNode();
@@ -337,9 +328,8 @@ app.post('/append-entries', (req, res) => {
 
 app.post('/client-stroke', (req, res) => {
   try {
-    const { stroke } = req.body;
-    const roomId = 'default'; // Extract from stroke if needed
-    node.handleClientStroke(roomId, stroke);
+    const { stroke, roomId } = req.body;
+    node.handleClientStroke(roomId || 'default', stroke);
     res.json({ success: true });
   } catch (e: any) {
     res.status(503).json({ error: e.message });

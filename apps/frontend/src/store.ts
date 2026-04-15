@@ -4,6 +4,7 @@ import { MsgType } from '@scraw/shared';
 interface DrawState {
   ws: WebSocket | null;
   roomId: string;
+  playerId: string;
   connect: (roomId: string) => void;
   sendBatch: (msg: any[]) => void;
   remoteStrokesQueue: any[];
@@ -12,6 +13,7 @@ interface DrawState {
 export const useStore = create<DrawState>((set, get) => ({
   ws: null,
   roomId: '',
+  playerId: '',
   remoteStrokesQueue: [],
   connect: (roomId) => {
     const existing = get().ws;
@@ -28,9 +30,12 @@ export const useStore = create<DrawState>((set, get) => ({
     const wsUrl = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8080';
     const ws = new WebSocket(wsUrl);
     
+    // Generate persistent playerId for this session
+    const playerId = 'player_' + Math.random().toString(36).substr(2, 9);
+    
     ws.onopen = () => {
         console.log("WS Connected!");
-        ws.send(JSON.stringify([MsgType.JOIN_ROOM, roomId, 'player_' + Math.floor(Math.random()*1000)]));
+        ws.send(JSON.stringify([MsgType.JOIN_ROOM, roomId, playerId]));
     };
     
     ws.onerror = (e) => console.error("WS Socket Error:", e);
@@ -45,11 +50,15 @@ export const useStore = create<DrawState>((set, get) => ({
           const history = msg[1] as any[][];
           get().remoteStrokesQueue.push(...history);
       } else if (type >= MsgType.DRAW_START && type <= MsgType.DRAW_END) {
-        get().remoteStrokesQueue.push(msg);
+        // Filter out our own strokes to prevent double drawing
+        const strokePlayerId = msg[msg.length - 1];
+        if (strokePlayerId !== get().playerId) {
+          get().remoteStrokesQueue.push(msg);
+        }
       }
     };
     
-    set({ ws, roomId, remoteStrokesQueue: [] });
+    set({ ws, roomId, playerId, remoteStrokesQueue: [] });
   },
   sendBatch: (msg) => {
     const { ws } = get();

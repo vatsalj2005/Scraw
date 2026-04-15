@@ -1,4 +1,3 @@
-version: "3.8"
 services:
   gateway:
     build:
@@ -81,7 +80,7 @@ services:
       - ./apps/frontend/src:/app/apps/frontend/src
       - ./packages:/app/packages
     environment:
-      - VITE_WS_URL=ws://127.0.0.1:8080
+      - VITE_WS_URL=ws://172.17.230.168:8080
     networks:
       - scraw-network
     command: npm run dev -- --host

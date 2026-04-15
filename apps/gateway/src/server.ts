@@ -4,11 +4,7 @@ import axios from 'axios';
 import { MsgType } from '@scraw/shared';
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : 8080;
-
-// Support both Docker (service names) and Cloud (URLs)
-const REPLICAS = process.env.REPLICA_URLS 
-  ? process.env.REPLICA_URLS.split(',')
-  : ['replica1:3001', 'replica2:3002', 'replica3:3003'];
+const REPLICAS = ['replica1:3001', 'replica2:3002', 'replica3:3003'];
 
 interface Client {
   ws: WebSocket;
@@ -19,10 +15,9 @@ interface Client {
 class Gateway {
   private clients: Set<Client> = new Set();
   private currentLeader: string | null = null;
-  private leaderCheckInterval: NodeJS.Timeout;
 
   constructor() {
-    this.leaderCheckInterval = setInterval(() => this.discoverLeader(), 2000);
+    setInterval(() => this.discoverLeader(), 2000);
     this.discoverLeader();
   }
 
@@ -37,24 +32,21 @@ class Gateway {
           }
           return;
         }
-      } catch (e) {
-        // Replica unreachable
-      }
+      } catch (e) {}
     }
     console.log('[GATEWAY] No leader found, retrying...');
   }
 
-  async forwardToLeader(msg: any[]): Promise<boolean> {
+  async forwardToLeader(msg: any[], roomId: string): Promise<boolean> {
     if (!this.currentLeader) {
       await this.discoverLeader();
       if (!this.currentLeader) return false;
     }
 
     try {
-      await axios.post(`http://${this.currentLeader}/client-stroke`, { stroke: msg }, { timeout: 500 });
+      await axios.post(`http://${this.currentLeader}/client-stroke`, { stroke: msg, roomId }, { timeout: 200 });
       return true;
     } catch (e) {
-      console.log(`[GATEWAY] Leader ${this.currentLeader} unreachable, rediscovering...`);
       this.currentLeader = null;
       return false;
     }
@@ -97,52 +89,25 @@ class Gateway {
           client = { ws, roomId, playerId };
           this.clients.add(client);
 
-          console.log(`[GATEWAY] Player ${playerId} joined room ${roomId}`);
-
-          // Send room history
           const history = await this.syncRoomHistory(roomId);
           if (history.length > 0) {
             ws.send(JSON.stringify([MsgType.SYNC, history]));
           }
 
-          // Broadcast player list
-          const players = Array.from(this.clients)
-            .filter(c => c.roomId === roomId)
-            .map(c => c.playerId);
-          this.broadcastToRoom(roomId, [MsgType.PLAYER_LIST, players]);
-
         } else if (type >= MsgType.DRAW_START && type <= MsgType.DRAW_END) {
           if (!client) return;
-          
-          // Append playerId
           msg.push(client.playerId);
-          
-          // Forward to leader
-          const success = await this.forwardToLeader(msg);
-          if (!success) {
-            console.log('[GATEWAY] Failed to forward stroke, leader unavailable');
-          }
+          await this.forwardToLeader(msg, client.roomId);
         }
-      } catch (e) {
-        console.error('[GATEWAY] Error processing message:', e);
-      }
+      } catch (e) {}
     });
 
     ws.on('close', () => {
-      if (client) {
-        this.clients.delete(client);
-        const players = Array.from(this.clients)
-          .filter(c => c.roomId === client!.roomId)
-          .map(c => c.playerId);
-        this.broadcastToRoom(client.roomId, [MsgType.PLAYER_LIST, players]);
-      }
+      if (client) this.clients.delete(client);
     });
-
-    ws.on('error', (err) => console.error('[GATEWAY] WS Error:', err));
   }
 
   startCommitListener() {
-    // Listen for committed strokes from replicas
     const commitServer = createServer((req, res) => {
       if (req.method === 'POST' && req.url === '/commit') {
         let body = '';
@@ -163,9 +128,7 @@ class Gateway {
         res.end();
       }
     });
-    commitServer.listen(8081, () => {
-      console.log('[GATEWAY] Commit listener on port 8081');
-    });
+    commitServer.listen(8081);
   }
 }
 
@@ -179,17 +142,7 @@ const server = createServer((req, res) => {
   }
 });
 
-// CORS for cloud deployment
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
-
-const wss = new WebSocketServer({ 
-  server,
-  verifyClient: (info) => {
-    // Allow all origins in development, restrict in production
-    return true;
-  }
-});
-
+const wss = new WebSocketServer({ server });
 const gateway = new Gateway();
 gateway.startCommitListener();
 
