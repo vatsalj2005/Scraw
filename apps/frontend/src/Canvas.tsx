@@ -99,6 +99,8 @@ export const Canvas = () => {
             ctx.lineWidth = width;
             ctx.beginPath();
             ctx.moveTo(x, y);
+            ctx.lineTo(x, y);
+            ctx.stroke();
         } else if (type === MsgType.DRAW_MOVE) {
             const x = msg[1];
             const y = msg[2];
@@ -106,6 +108,8 @@ export const Canvas = () => {
             if (pState) {
               ctx.strokeStyle = pState.color;
               ctx.lineWidth = pState.width;
+              ctx.beginPath();
+              ctx.moveTo(pState.x, pState.y);
               ctx.lineTo(x, y);
               ctx.stroke();
               pState.x = x;
