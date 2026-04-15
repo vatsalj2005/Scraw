@@ -80,7 +80,7 @@ services:
       - ./apps/frontend/src:/app/apps/frontend/src
       - ./packages:/app/packages
     environment:
-      - VITE_WS_URL=ws://192.168.0.216:8080
+      - VITE_WS_URL=ws://172.17.230.168:8080
     networks:
       - scraw-network
     command: npm run dev -- --host
