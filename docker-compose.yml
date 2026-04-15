@@ -1,24 +1,75 @@
 version: "3.8"
 services:
-  backend:
-    build: 
+  gateway:
+    build:
       context: .
-      dockerfile: ./apps/backend/Dockerfile
+      dockerfile: ./apps/gateway/Dockerfile
     ports:
       - "8080:8080"
+      - "8081:8081"
     environment:
       - NODE_ENV=development
-      - REDIS_URL=redis://redis:6379
+      - PORT=8080
     volumes:
-      - ./apps/backend:/app/apps/backend
+      - ./apps/gateway/src:/app/apps/gateway/src
       - ./packages:/app/packages
+    networks:
+      - scraw-network
     depends_on:
-      - redis
+      - replica1
+      - replica2
+      - replica3
 
-  redis:
-    image: redis:alpine
+  replica1:
+    build:
+      context: .
+      dockerfile: ./apps/replica/Dockerfile
     ports:
-      - "6379:6379"
+      - "3001:3001"
+    environment:
+      - REPLICA_ID=replica1
+      - PORT=3001
+      - PEERS=replica2:3002,replica3:3003
+      - GATEWAY_URL=http://gateway:8081
+    volumes:
+      - ./apps/replica/src:/app/apps/replica/src
+      - ./packages:/app/packages
+    networks:
+      - scraw-network
+
+  replica2:
+    build:
+      context: .
+      dockerfile: ./apps/replica/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - REPLICA_ID=replica2
+      - PORT=3002
+      - PEERS=replica1:3001,replica3:3003
+      - GATEWAY_URL=http://gateway:8081
+    volumes:
+      - ./apps/replica/src:/app/apps/replica/src
+      - ./packages:/app/packages
+    networks:
+      - scraw-network
+
+  replica3:
+    build:
+      context: .
+      dockerfile: ./apps/replica/Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - REPLICA_ID=replica3
+      - PORT=3003
+      - PEERS=replica1:3001,replica2:3002
+      - GATEWAY_URL=http://gateway:8081
+    volumes:
+      - ./apps/replica/src:/app/apps/replica/src
+      - ./packages:/app/packages
+    networks:
+      - scraw-network
 
   frontend:
     build:
@@ -27,8 +78,14 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      - ./apps/frontend:/app/apps/frontend
+      - ./apps/frontend/src:/app/apps/frontend/src
       - ./packages:/app/packages
     environment:
       - VITE_WS_URL=ws://127.0.0.1:8080
+    networks:
+      - scraw-network
     command: npm run dev -- --host
+
+networks:
+  scraw-network:
+    driver: bridge

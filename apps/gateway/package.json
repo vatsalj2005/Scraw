@@ -1,0 +1,24 @@
+{
+  "name": "gateway",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/server.ts",
+  "scripts": {
+    "start": "ts-node src/server.ts",
+    "dev": "nodemon --watch src --ext ts --exec ts-node src/server.ts",
+    "build": "tsc",
+    "prod": "node dist/server.js"
+  },
+  "dependencies": {
+    "@scraw/shared": "*",
+    "ws": "^8.16.0",
+    "axios": "^1.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.2",
+    "nodemon": "^3.0.3",
+    "typescript": "^5.3.3"
+  }
+}

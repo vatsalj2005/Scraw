@@ -24,7 +24,7 @@ export const useStore = create<DrawState>((set, get) => ({
         existing.close();
     }
 
-    console.log(`Connecting to WS room: ${roomId} at 127.0.0.1:8080...`);
+    console.log(`Connecting to Gateway for room: ${roomId}...`);
     const wsUrl = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8080';
     const ws = new WebSocket(wsUrl);
     
