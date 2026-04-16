@@ -34,7 +34,6 @@
 9. [Docker & Hot Reload](#9-docker--hot-reload)
 10. [API Reference](#10-api-reference)
 11. [Team Contributions](#11-team-contributions)
-12. [Viva Q&A Prep](#12-viva-qa-prep)
 
 ---
 
@@ -524,4 +523,3 @@ All messages are JSON arrays: `[MsgType, ...payload]`
 - Implemented the separate `replica1/src`, `replica2/src`, `replica3/src` folder strategy
 - Managed the shared `packages/shared` protocol package and workspace config
 - Tested zero-downtime rolling reload scenarios
-  
