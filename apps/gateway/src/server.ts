@@ -38,18 +38,32 @@ class Gateway {
   }
 
   async forwardToLeader(msg: any[], roomId: string): Promise<boolean> {
-    if (!this.currentLeader) {
-      await this.discoverLeader();
-      if (!this.currentLeader) return false;
+    // Retry up to 3 times to handle leader failover mid-stroke
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!this.currentLeader) {
+        await this.discoverLeader();
+        if (!this.currentLeader) {
+          console.log('[GATEWAY] No leader available, retrying...');
+          await new Promise(r => setTimeout(r, 200));
+          continue;
+        }
+      }
+
+      try {
+        await axios.post(
+          `http://${this.currentLeader}/client-stroke`,
+          { stroke: msg, roomId },
+          { timeout: 200 }
+        );
+        return true;
+      } catch (e) {
+        console.log(`[GATEWAY] Forward to leader ${this.currentLeader} failed (attempt ${attempt + 1}), re-discovering...`);
+        this.currentLeader = null;
+      }
     }
 
-    try {
-      await axios.post(`http://${this.currentLeader}/client-stroke`, { stroke: msg, roomId }, { timeout: 200 });
-      return true;
-    } catch (e) {
-      this.currentLeader = null;
-      return false;
-    }
+    console.error('[GATEWAY] Failed to forward stroke after 3 attempts');
+    return false;
   }
 
   async syncRoomHistory(roomId: string): Promise<any[]> {
