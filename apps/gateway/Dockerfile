@@ -11,4 +11,4 @@ COPY packages/shared ./packages/shared
 COPY apps/gateway ./apps/gateway
 
 WORKDIR /app/apps/gateway
-CMD ["npm", "run", "dev"]
+CMD ["npx", "nodemon", "--watch", "src", "--ext", "ts", "--exec", "npx ts-node src/server.ts"]

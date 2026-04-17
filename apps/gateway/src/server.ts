@@ -16,15 +16,62 @@ class Gateway {
   private clients: Set<Client> = new Set();
   private currentLeader: string | null = null;
 
+  // Reachability tracking per replica
+  private replicaReachable: Map<string, boolean> = new Map(
+    REPLICAS.map(r => [r, true])
+  );
+  private quorumLost = false;
+
   constructor() {
     setInterval(() => this.discoverLeader(), 2000);
     this.discoverLeader();
   }
 
+  // ─── Replica health tracking ──────────────────────────────────────────────
+
+  private markReachable(replica: string) {
+    if (this.replicaReachable.get(replica) === false) {
+      console.log(`\n[GATEWAY] Replica ${replica} is back online\n`);
+      this.replicaReachable.set(replica, true);
+      this.checkQuorum();
+    }
+  }
+
+  private markUnreachable(replica: string) {
+    if (this.replicaReachable.get(replica) !== false) {
+      console.log(`\n[GATEWAY] Replica ${replica} appears to be DOWN\n`);
+      this.replicaReachable.set(replica, false);
+      this.checkQuorum();
+    }
+  }
+
+  private checkQuorum() {
+    const upCount = [...this.replicaReachable.values()].filter(Boolean).length;
+    const total = REPLICAS.length;
+    const majority = Math.floor(total / 2) + 1;
+
+    if (upCount < majority && !this.quorumLost) {
+      this.quorumLost = true;
+      console.log(
+        `\n[GATEWAY] QUORUM LOST — only ${upCount}/${total} replicas reachable` +
+        ` (need ${majority}). Writes will be unavailable until quorum is restored.\n`
+      );
+    } else if (upCount >= majority && this.quorumLost) {
+      this.quorumLost = false;
+      console.log(
+        `\n[GATEWAY] QUORUM RESTORED — ${upCount}/${total} replicas reachable.` +
+        ` Cluster is healthy again.\n`
+      );
+    }
+  }
+
+  // ─── Leader discovery ─────────────────────────────────────────────────────
+
   async discoverLeader() {
     for (const replica of REPLICAS) {
       try {
         const res = await axios.get(`http://${replica}/status`, { timeout: 1000 });
+        this.markReachable(replica);
         if (res.data.state === 'LEADER') {
           if (this.currentLeader !== replica) {
             console.log(`[GATEWAY] New leader discovered: ${replica}`);
@@ -32,9 +79,14 @@ class Gateway {
           }
           return;
         }
-      } catch (e) {}
+      } catch (e) {
+        this.markUnreachable(replica);
+      }
     }
-    console.log('[GATEWAY] No leader found, retrying...');
+
+    if (!this.quorumLost) {
+      console.log('[GATEWAY] No leader found among reachable replicas, retrying...');
+    }
   }
 
   async forwardToLeader(msg: any[], roomId: string): Promise<boolean> {

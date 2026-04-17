@@ -14,4 +14,4 @@ COPY apps/replica ./apps/replica
 COPY apps/replica1/src ./apps/replica/src
 
 WORKDIR /app/apps/replica
-CMD ["npm", "run", "dev"]
+CMD ["npx", "nodemon", "--watch", "src", "--ext", "ts", "--exec", "npx ts-node src/server.ts"]

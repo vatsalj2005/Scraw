@@ -37,9 +37,40 @@ class RaftNode {
   private nextIndex: Map<string, number> = new Map();
   private matchIndex: Map<string, number> = new Map();
 
+  // Per-peer reachability tracking (leader perspective)
+  private peerReachable: Map<string, boolean> = new Map(PEERS.map(p => [p, true]));
+
   constructor() {
-    console.log(`[${REPLICA_ID}] Starting as FOLLOWER`);
+    console.log(`\n[${REPLICA_ID}] Node started — joining cluster as FOLLOWER\n`);
     this.resetElectionTimeout();
+    this.registerShutdownHooks();
+  }
+
+  // ─── Graceful shutdown ────────────────────────────────────────────────────
+
+  private registerShutdownHooks() {
+    const shutdown = (signal: string) => {
+      console.log(`\n[${REPLICA_ID}] Node stopping (${signal}) — leaving cluster\n`);
+      process.exit(0);
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT',  () => shutdown('SIGINT'));
+  }
+
+  // ─── Peer reachability tracking ───────────────────────────────────────────
+
+  private onPeerReachable(peer: string) {
+    if (this.peerReachable.get(peer) === false) {
+      console.log(`\n[${REPLICA_ID}] Peer ${peer} is back online\n`);
+      this.peerReachable.set(peer, true);
+    }
+  }
+
+  private onPeerUnreachable(peer: string) {
+    if (this.peerReachable.get(peer) !== false) {
+      console.log(`\n[${REPLICA_ID}] Peer ${peer} is unreachable (may be down)\n`);
+      this.peerReachable.set(peer, false);
+    }
   }
 
   // ─── Public status ────────────────────────────────────────────────────────
@@ -70,7 +101,7 @@ class RaftNode {
     this.votedFor = REPLICA_ID;
     this.votesReceived = 1; // vote for self
 
-    console.log(`[${REPLICA_ID}] Starting election for term ${this.currentTerm}`);
+    console.log(`\n[${REPLICA_ID}] Starting election for term ${this.currentTerm}\n`);
 
     this.resetElectionTimeout(); // restart timer in case of split vote
 
@@ -88,6 +119,8 @@ class RaftNode {
         { timeout: 300 }
       );
 
+      this.onPeerReachable(peer);
+
       if (res.data.voteGranted && this.state === 'CANDIDATE') {
         this.votesReceived++;
         console.log(
@@ -100,13 +133,13 @@ class RaftNode {
         this.stepDown(res.data.term);
       }
     } catch (_) {
-      // peer unreachable — silent
+      this.onPeerUnreachable(peer);
     }
   }
 
   private becomeLeader() {
     if (this.state !== 'CANDIDATE') return; // guard against duplicate calls
-    console.log(`[${REPLICA_ID}] Became LEADER for term ${this.currentTerm}`);
+    console.log(`\n[${REPLICA_ID}] Became LEADER for term ${this.currentTerm}\n`);
     this.state = 'LEADER';
 
     if (this.electionTimeout) {
@@ -126,7 +159,7 @@ class RaftNode {
   }
 
   private stepDown(newTerm: number) {
-    console.log(`[${REPLICA_ID}] Stepping down to FOLLOWER (term ${newTerm})`);
+    console.log(`\n[${REPLICA_ID}] Stepping down to FOLLOWER (term ${newTerm})\n`);
     this.state = 'FOLLOWER';
     this.currentTerm = newTerm;
     this.votedFor = null;
@@ -141,12 +174,7 @@ class RaftNode {
 
   // ─── Heartbeat (dedicated RPC — also used for AppendEntries) ─────────────
 
-  /**
-   * Sends a pure heartbeat (no entries) to a single peer.
-   * Called by the /heartbeat HTTP endpoint and by the heartbeat interval.
-   */
   async sendHeartbeatToPeer(peer: string): Promise<void> {
-    // A heartbeat is an AppendEntries with no new entries
     await this.sendAppendEntries(peer);
   }
 
@@ -179,6 +207,8 @@ class RaftNode {
         { timeout: 150 }
       );
 
+      this.onPeerReachable(peer);
+
       if (res.data.success) {
         if (entries.length > 0) {
           const newMatchIndex = nextIdx + entries.length - 1;
@@ -200,15 +230,13 @@ class RaftNode {
         }
       }
     } catch (_) {
-      // peer unreachable
+      this.onPeerUnreachable(peer);
     }
   }
 
   // ─── Commit ───────────────────────────────────────────────────────────────
 
   private updateCommitIndex() {
-    // Find highest N > commitIndex where log[N].term === currentTerm
-    // and a majority of matchIndex values are >= N
     for (let n = this.log.length - 1; n > this.commitIndex; n--) {
       if (this.log[n].term !== this.currentTerm) continue;
 
@@ -265,7 +293,6 @@ class RaftNode {
       const myLastIndex = this.log.length - 1;
       const myLastTerm = this.log.length > 0 ? this.log[myLastIndex].term : 0;
 
-      // Candidate log must be at least as up-to-date as ours
       if (
         lastLogTerm > myLastTerm ||
         (lastLogTerm === myLastTerm && lastLogIndex >= myLastIndex)
@@ -305,7 +332,6 @@ class RaftNode {
         prevLogIndex >= this.log.length ||
         this.log[prevLogIndex].term !== prevLogTerm
       ) {
-        // Return our log length so the leader can jump directly to the right index
         console.log(
           `[${REPLICA_ID}] Log inconsistency: prevLogIndex=${prevLogIndex}, myLogLength=${this.log.length}`
         );
@@ -330,8 +356,6 @@ class RaftNode {
   }
 
   handleHeartbeat(req: any): AppendEntriesResponse {
-    // A heartbeat is semantically identical to an empty AppendEntries.
-    // We delegate to handleAppendEntries with no entries.
     return this.handleAppendEntries({ ...req, entries: [] });
   }
 
@@ -383,25 +407,21 @@ app.get('/status', (_req, res) => {
   res.json(node.getState());
 });
 
-// RAFT RPC: RequestVote
 app.post('/request-vote', (req, res) => {
   const result = node.handleRequestVote(req.body);
   res.json(result);
 });
 
-// RAFT RPC: AppendEntries (log replication)
 app.post('/append-entries', (req, res) => {
   const result = node.handleAppendEntries(req.body);
   res.json(result);
 });
 
-// RAFT RPC: Heartbeat (dedicated endpoint — delegates to AppendEntries with no entries)
 app.post('/heartbeat', (req, res) => {
   const result = node.handleHeartbeat(req.body);
   res.json(result);
 });
 
-// Gateway → Leader: submit a new client stroke
 app.post('/client-stroke', (req, res) => {
   try {
     const { stroke, roomId } = req.body;
@@ -412,13 +432,11 @@ app.post('/client-stroke', (req, res) => {
   }
 });
 
-// Gateway → Leader: fetch committed stroke history for a room (used on client join)
 app.get('/room-log/:roomId', (req, res) => {
   const log = node.getRoomLog(req.params.roomId);
   res.json({ log });
 });
 
-// Follower catch-up: return all log entries from fromIndex onward
 app.get('/sync-log', (req, res) => {
   const fromIndex = parseInt(req.query.fromIndex as string) || 0;
   const entries = node.getSyncLog(fromIndex);
