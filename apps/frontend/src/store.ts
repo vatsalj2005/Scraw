@@ -5,6 +5,7 @@ interface DrawState {
   ws: WebSocket | null;
   roomId: string;
   playerId: string;
+  sessionId: number;  // increments on every new connection; triggers canvas reset
   connect: (roomId: string) => void;
   sendBatch: (msg: any[]) => void;
   remoteStrokesQueue: any[];
@@ -14,6 +15,7 @@ export const useStore = create<DrawState>((set, get) => ({
   ws: null,
   roomId: '',
   playerId: '',
+  sessionId: 0,
   remoteStrokesQueue: [],
   connect: (roomId) => {
     const existing = get().ws;
@@ -40,25 +42,45 @@ export const useStore = create<DrawState>((set, get) => ({
     
     ws.onerror = (e) => console.error("WS Socket Error:", e);
     
-    ws.onclose = (e) => console.log("WS Closed:", e.code, e.reason);
-    
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      const type = msg[0];
-      
-      if (type === MsgType.SYNC) {
-          const history = msg[1] as any[][];
-          get().remoteStrokesQueue.push(...history);
-      } else if (type >= MsgType.DRAW_START && type <= MsgType.DRAW_END) {
-        // Filter out our own strokes to prevent double drawing
-        const strokePlayerId = msg[msg.length - 1];
-        if (strokePlayerId !== get().playerId) {
-          get().remoteStrokesQueue.push(msg);
-        }
+    ws.onclose = (e) => {
+      console.log("WS Closed:", e.code, e.reason);
+      // Auto-reconnect on unexpected close (not normal closure or going away)
+      if (e.code !== 1000 && e.code !== 1001) {
+        console.log("Attempting to reconnect in 2 seconds...");
+        setTimeout(() => {
+          const currentRoomId = get().roomId;
+          if (currentRoomId) {
+            connect(currentRoomId);
+          }
+        }, 2000);
       }
     };
     
-    set({ ws, roomId, playerId, remoteStrokesQueue: [] });
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (!Array.isArray(msg) || typeof msg[0] !== 'number') {
+        console.error('[FRONTEND] Invalid message format:', msg);
+        return;
+      }
+      const type = msg[0];
+
+      if (type === MsgType.SYNC) {
+        // history is an array of complete STROKE messages
+        const history = msg[1] as any[][];
+        console.log('SYNC history:', history.length, 'strokes');
+        get().remoteStrokesQueue.push(...history);
+
+      } else if (type === MsgType.STROKE) {
+        // Live broadcast of a committed stroke — filter own strokes
+        const strokePlayerId = msg[msg.length - 1];
+        if (strokePlayerId !== playerId) {
+          get().remoteStrokesQueue.push(msg);
+        }
+      }
+      // Ignore legacy DRAW_START / DRAW_MOVE / DRAW_END
+    };
+    
+    set({ ws, roomId, playerId, remoteStrokesQueue: [], sessionId: get().sessionId + 1 });
   },
   sendBatch: (msg) => {
     const { ws } = get();

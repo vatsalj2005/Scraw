@@ -37,6 +37,9 @@ class RaftNode {
   private nextIndex: Map<string, number> = new Map();
   private matchIndex: Map<string, number> = new Map();
 
+  // Re-entrancy guard for applyCommitted
+  private applyRunning = false;
+
   // Per-peer reachability tracking (leader perspective)
   private peerReachable: Map<string, boolean> = new Map(PEERS.map(p => [p, true]));
 
@@ -172,12 +175,6 @@ class RaftNode {
     this.resetElectionTimeout();
   }
 
-  // ─── Heartbeat (dedicated RPC — also used for AppendEntries) ─────────────
-
-  async sendHeartbeatToPeer(peer: string): Promise<void> {
-    await this.sendAppendEntries(peer);
-  }
-
   private async sendHeartbeats() {
     if (this.state !== 'LEADER') return;
     PEERS.forEach(peer => this.sendAppendEntries(peer));
@@ -191,7 +188,11 @@ class RaftNode {
     const prevLogTerm = prevLogIndex >= 0 && this.log[prevLogIndex]
       ? this.log[prevLogIndex].term
       : 0;
-    const entries = this.log.slice(nextIdx);
+    
+    // Chunk large catch-ups to avoid payload size issues (max 100 entries per batch)
+    const MAX_ENTRIES_PER_BATCH = 100;
+    const allEntries = this.log.slice(nextIdx);
+    const entries = allEntries.slice(0, MAX_ENTRIES_PER_BATCH);
 
     try {
       const res = await axios.post<AppendEntriesResponse>(
@@ -204,7 +205,7 @@ class RaftNode {
           entries,
           leaderCommit: this.commitIndex,
         },
-        { timeout: 150 }
+        { timeout: 500, maxBodyLength: 50 * 1024 * 1024 }
       );
 
       this.onPeerReachable(peer);
@@ -215,6 +216,11 @@ class RaftNode {
           this.nextIndex.set(peer, nextIdx + entries.length);
           this.matchIndex.set(peer, newMatchIndex);
           this.updateCommitIndex();
+          
+          // If there are more entries to send, send them immediately
+          if (allEntries.length > MAX_ENTRIES_PER_BATCH) {
+            setImmediate(() => this.sendAppendEntries(peer));
+          }
         }
       } else {
         if (res.data.term > this.currentTerm) {
@@ -255,24 +261,30 @@ class RaftNode {
   }
 
   private async applyCommitted() {
-    while (this.lastApplied < this.commitIndex) {
-      this.lastApplied++;
-      const entry = this.log[this.lastApplied];
-      if (!entry) break;
+    if (this.applyRunning) return;
+    this.applyRunning = true;
+    try {
+      while (this.lastApplied < this.commitIndex) {
+        this.lastApplied++;
+        const entry = this.log[this.lastApplied];
+        if (!entry) break;
 
-      console.log(
-        `[${REPLICA_ID}] Applying log[${this.lastApplied}] to gateway (room: ${entry.roomId})`
-      );
-
-      try {
-        await axios.post(
-          `${GATEWAY_URL}/commit`,
-          { roomId: entry.roomId, stroke: entry.stroke },
-          { timeout: 200 }
+        console.log(
+          `[${REPLICA_ID}] Applying log[${this.lastApplied}] to gateway (room: ${entry.roomId})`
         );
-      } catch (e) {
-        console.error(`[${REPLICA_ID}] Failed to notify gateway for index ${this.lastApplied}:`, e);
+
+        try {
+          await axios.post(
+            `${GATEWAY_URL}/commit`,
+            { roomId: entry.roomId, stroke: entry.stroke },
+            { timeout: 200 }
+          );
+        } catch (e) {
+          console.error(`[${REPLICA_ID}] Failed to notify gateway for index ${this.lastApplied}:`, e);
+        }
       }
+    } finally {
+      this.applyRunning = false;
     }
   }
 
@@ -355,10 +367,6 @@ class RaftNode {
     return { term: this.currentTerm, success: true };
   }
 
-  handleHeartbeat(req: any): AppendEntriesResponse {
-    return this.handleAppendEntries({ ...req, entries: [] });
-  }
-
   handleClientStroke(roomId: string, stroke: any[]) {
     if (this.state !== 'LEADER') {
       throw new Error('Not leader');
@@ -374,11 +382,6 @@ class RaftNode {
     this.log.push(entry);
     console.log(`[${REPLICA_ID}] Appended stroke to log (index ${entry.index})`);
 
-    // Optimistic immediate notify for low-latency feel
-    axios
-      .post(`${GATEWAY_URL}/commit`, { roomId, stroke }, { timeout: 100 })
-      .catch(() => {});
-
     // Replicate to followers
     this.sendHeartbeats();
   }
@@ -388,16 +391,12 @@ class RaftNode {
       .filter(entry => entry.roomId === roomId && entry.index <= this.commitIndex)
       .map(entry => entry.stroke);
   }
-
-  getSyncLog(fromIndex: number): LogEntry[] {
-    return this.log.slice(fromIndex);
-  }
 }
 
 // ─── Express app ─────────────────────────────────────────────────────────────
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 const node = new RaftNode();
 
@@ -417,11 +416,6 @@ app.post('/append-entries', (req, res) => {
   res.json(result);
 });
 
-app.post('/heartbeat', (req, res) => {
-  const result = node.handleHeartbeat(req.body);
-  res.json(result);
-});
-
 app.post('/client-stroke', (req, res) => {
   try {
     const { stroke, roomId } = req.body;
@@ -435,12 +429,6 @@ app.post('/client-stroke', (req, res) => {
 app.get('/room-log/:roomId', (req, res) => {
   const log = node.getRoomLog(req.params.roomId);
   res.json({ log });
-});
-
-app.get('/sync-log', (req, res) => {
-  const fromIndex = parseInt(req.query.fromIndex as string) || 0;
-  const entries = node.getSyncLog(fromIndex);
-  res.json({ entries });
 });
 
 app.listen(PORT, () => {

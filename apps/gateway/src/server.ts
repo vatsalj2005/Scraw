@@ -84,6 +84,9 @@ class Gateway {
       }
     }
 
+    // No leader found - clear stale leader reference
+    this.currentLeader = null;
+    
     if (!this.quorumLost) {
       console.log('[GATEWAY] No leader found among reachable replicas, retrying...');
     }
@@ -125,7 +128,7 @@ class Gateway {
     }
 
     try {
-      const res = await axios.get(`http://${this.currentLeader}/room-log/${roomId}`, { timeout: 1000 });
+      const res = await axios.get(`http://${this.currentLeader}/room-log/${encodeURIComponent(roomId)}`, { timeout: 1000 });
       return res.data.log || [];
     } catch (e) {
       return [];
@@ -134,11 +137,14 @@ class Gateway {
 
   broadcastToRoom(roomId: string, msg: any[]) {
     const payload = JSON.stringify(msg);
+    let sentCount = 0;
     for (const client of this.clients) {
       if (client.roomId === roomId && client.ws.readyState === WebSocket.OPEN) {
         client.ws.send(payload);
+        sentCount++;
       }
     }
+    console.log(`[GATEWAY] Broadcast to ${sentCount} clients in room ${roomId}`);
   }
 
   handleConnection(ws: WebSocket) {
@@ -147,6 +153,10 @@ class Gateway {
     ws.on('message', async (data: Buffer) => {
       try {
         const msg = JSON.parse(data.toString());
+        if (!Array.isArray(msg) || typeof msg[0] !== 'number') {
+          console.error('[GATEWAY] Invalid message format:', msg);
+          return;
+        }
         const type = msg[0];
 
         if (type === MsgType.JOIN_ROOM) {
@@ -154,22 +164,32 @@ class Gateway {
           const playerId = msg[2];
           client = { ws, roomId, playerId };
           this.clients.add(client);
+          console.log(`[GATEWAY] Client ${playerId} joined room ${roomId}. Total clients: ${this.clients.size}`);
 
           const history = await this.syncRoomHistory(roomId);
           if (history.length > 0) {
             ws.send(JSON.stringify([MsgType.SYNC, history]));
+            console.log(`[GATEWAY] Sent ${history.length} history strokes to ${playerId}`);
           }
 
-        } else if (type >= MsgType.DRAW_START && type <= MsgType.DRAW_END) {
+        } else if (type === MsgType.STROKE) {
+          // Complete stroke: [STROKE, color, width, [[x,y],...]]
+          // Append playerId then forward to leader as one atomic entry
           if (!client) return;
           msg.push(client.playerId);
+          console.log(`[GATEWAY] Forwarding STROKE from ${client.playerId} to leader`);
           await this.forwardToLeader(msg, client.roomId);
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error('[GATEWAY] Error handling message:', e);
+      }
     });
 
     ws.on('close', () => {
-      if (client) this.clients.delete(client);
+      if (client) {
+        console.log(`[GATEWAY] Client ${client.playerId} disconnected from room ${client.roomId}`);
+        this.clients.delete(client);
+      }
     });
   }
 
@@ -181,10 +201,20 @@ class Gateway {
         req.on('end', () => {
           try {
             const { roomId, stroke } = JSON.parse(body);
+            if (!roomId || !stroke) {
+              console.error('[GATEWAY] Missing roomId or stroke in commit');
+              res.writeHead(400);
+              res.end('Missing fields');
+              return;
+            }
+            console.log(`[GATEWAY] Received commit for room ${roomId}, broadcasting to ${this.clients.size} clients`);
+            const clientsInRoom = Array.from(this.clients).filter(c => c.roomId === roomId);
+            console.log(`[GATEWAY] Clients in room ${roomId}: ${clientsInRoom.length}`);
             this.broadcastToRoom(roomId, stroke);
             res.writeHead(200);
             res.end('OK');
           } catch (e) {
+            console.error('[GATEWAY] Error processing commit:', e);
             res.writeHead(400);
             res.end('Bad Request');
           }
@@ -195,6 +225,7 @@ class Gateway {
       }
     });
     commitServer.listen(8081);
+    console.log('[GATEWAY] Commit listener started on port 8081');
   }
 }
 
