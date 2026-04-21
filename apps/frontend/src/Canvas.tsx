@@ -13,8 +13,8 @@ const STROKE_WIDTH = 3;
 
 export const Canvas = () => {
   const canvasRef   = useRef<HTMLCanvasElement>(null);
-  const roomId      = useStore(state => state.roomId);
-  const sessionId   = useStore(state => state.sessionId);
+  const roomId      = useStore((state) => state.roomId);
+  const sessionId   = useStore((state) => state.sessionId);
   const ctxRef      = useRef<CanvasRenderingContext2D | null>(null);
 
   // Local drawing state
