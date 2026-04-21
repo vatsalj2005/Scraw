@@ -165,8 +165,9 @@ Replica1 rejoins as a follower and catches up on any missed strokes.
 - `sendBatch(msg)` — sends a draw event to the gateway
 
 `Canvas.tsx` — the drawing surface:
-- Pointer down → starts a stroke locally AND sends `DRAW_START` to gateway
-- Pointer move → continues stroke with proper path management AND sends `DRAW_MOVE` to gateway
+- Pointer down → starts a stroke locally for immediate feedback
+- Pointer move → continues stroke with proper path management
+- Pointer up → sends complete stroke as atomic STROKE message to gateway
 - A `requestAnimationFrame` loop drains `remoteStrokesQueue` and draws remote strokes
 - Filters out own strokes (matched by `playerId`) to avoid drawing twice
 - Each remote stroke maintains its own state to prevent line artifacts
@@ -256,17 +257,15 @@ matchIndex: Map        // leader tracks: highest confirmed index per follower
 
 ```typescript
 enum MsgType {
-  JOIN_ROOM  = 0,   // browser → gateway: "I want to join room X"
-  DRAW_START = 3,   // stroke begins (x, y, color, width)
-  DRAW_MOVE  = 4,   // stroke continues (x, y)
-  DRAW_END   = 5,   // stroke ends
-  SYNC       = 9,   // gateway → browser: full history on join
+  JOIN_ROOM = 0,   // browser → gateway: "I want to join room X"
+  STROKE    = 6,   // complete stroke: [6, color, width, [[x,y],...], playerId]
+  SYNC      = 9,   // gateway → browser: full history on join
 }
 ```
 
 Messages are JSON arrays for minimal overhead: `[MsgType, ...args]`
 
-Example: `[3, 450, 200, "#ff0055", 3]` = DRAW_START at (450,200), red, 3px wide.
+Example: `[6, "#ff0055", 3, [[450,200], [451,201], [452,203]]]` = STROKE with color, width, and point array.
 
 ---
 
@@ -315,33 +314,37 @@ If a follower is behind (just restarted), the leader sends it everything it miss
 1. Mouse down on canvas
    → Canvas.tsx fires handlePointerDown
    → Draws locally (immediate feedback)
-   → store.sendBatch([DRAW_START, x, y, color, width])
+   → Buffers points as user moves pointer
 
-2. WebSocket sends [3, 450, 200, "#ff0055", 3] to Gateway:8080
+2. Mouse up on canvas
+   → Canvas.tsx fires handlePointerEnd
+   → store.sendBatch([STROKE, color, width, [[x,y], [x,y], ...]])
 
-3. Gateway.handleConnection receives message
-   → Appends playerId: [3, 450, 200, "#ff0055", 3, "player_x7k2m"]
+3. WebSocket sends [6, "#ff0055", 3, [[450,200], [451,201], ...]] to Gateway:8080
+
+4. Gateway.handleConnection receives message
+   → Appends playerId: [6, "#ff0055", 3, [[450,200], ...], "player_x7k2m"]
    → axios.post("http://replica2:3002/client-stroke", { stroke, roomId })
 
-4. Replica2 (Leader) handleClientStroke
+5. Replica2 (Leader) handleClientStroke
    → Appends LogEntry { term:3, roomId:"room1", stroke:[...], index:7 }
    → Optimistically POSTs to gateway:8081/commit (low latency)
    → Sends AppendEntries to replica1 and replica3
 
-5. Replica1 & Replica3 handleAppendEntries
+6. Replica1 & Replica3 handleAppendEntries
    → Append entry to their logs
    → Return { success: true }
 
-6. Leader updateCommitIndex
+7. Leader updateCommitIndex
    → matchIndex for both followers now >= 7
    → count = 3 > 1.5 → commit!
    → applyCommitted() → POST gateway:8081/commit { roomId, stroke }
 
-7. Gateway /commit handler
+8. Gateway /commit handler
    → broadcastToRoom("room1", stroke)
    → Sends to all WebSocket clients in room1
 
-8. Other browsers receive the stroke
+9. Other browsers receive the stroke
    → store.onmessage pushes to remoteStrokesQueue
    → Canvas renderLoop draws it (filtered: not own playerId)
 ```
@@ -483,8 +486,6 @@ All messages are JSON arrays: `[MsgType, ...payload]`
 | STROKE | Browser → Gateway | `[6, color, lineWidth, [[x,y],...]]` |
 | STROKE (broadcast) | Gateway → Browser | `[6, color, lineWidth, [[x,y],...], playerId]` |
 | SYNC | Gateway → Browser | `[9, [[stroke1], [stroke2], ...]]` |
-
-> **Note:** DRAW_START (3), DRAW_MOVE (4), and DRAW_END (5) are retained in the enum for backwards compatibility but are no longer used. All drawing is transmitted as a single atomic STROKE (6) message per stroke.
 
 ---
 

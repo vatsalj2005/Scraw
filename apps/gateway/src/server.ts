@@ -1,7 +1,33 @@
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import axios from 'axios';
+import http from 'http';
+import https from 'https';
 import { MsgType } from '@scraw/shared';
+
+// Configure axios to reuse connections and prevent socket listener leaks
+const httpAgent = new http.Agent({ 
+  keepAlive: true,
+  maxSockets: 50,
+  maxFreeSockets: 10,
+  timeout: 60000,
+  keepAliveMsecs: 1000
+});
+
+const httpsAgent = new https.Agent({ 
+  keepAlive: true,
+  maxSockets: 50,
+  maxFreeSockets: 10,
+  timeout: 60000,
+  keepAliveMsecs: 1000
+});
+
+// Increase max listeners to handle concurrent requests
+httpAgent.setMaxListeners(50);
+httpsAgent.setMaxListeners(50);
+
+axios.defaults.httpAgent = httpAgent;
+axios.defaults.httpsAgent = httpsAgent;
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : 8080;
 const REPLICAS = ['replica1:3001', 'replica2:3002', 'replica3:3003'];
@@ -68,6 +94,8 @@ class Gateway {
   // ─── Leader discovery ─────────────────────────────────────────────────────
 
   async discoverLeader() {
+    let leaderFound = false;
+    
     for (const replica of REPLICAS) {
       try {
         const res = await axios.get(`http://${replica}/status`, { timeout: 1000 });
@@ -77,29 +105,44 @@ class Gateway {
             console.log(`[GATEWAY] New leader discovered: ${replica}`);
             this.currentLeader = replica;
           }
-          return;
+          leaderFound = true;
         }
       } catch (e) {
         this.markUnreachable(replica);
       }
     }
 
-    // No leader found - clear stale leader reference
-    this.currentLeader = null;
-    
-    if (!this.quorumLost) {
-      console.log('[GATEWAY] No leader found among reachable replicas, retrying...');
+    // If no leader found, clear stale leader reference
+    if (!leaderFound) {
+      this.currentLeader = null;
+      
+      if (!this.quorumLost) {
+        console.log('[GATEWAY] No leader found among reachable replicas (election may be in progress)');
+      }
     }
   }
 
   async forwardToLeader(msg: any[], roomId: string): Promise<boolean> {
-    // Retry up to 3 times to handle leader failover mid-stroke
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // Check if quorum is lost before attempting to forward
+    if (this.quorumLost) {
+      console.log('[GATEWAY] Cannot forward stroke - quorum lost (cluster unavailable)');
+      return false;
+    }
+
+    // Retry up to 5 times with longer delays to allow for election completion
+    // RAFT elections can take up to 800ms, so we need to be patient
+    for (let attempt = 0; attempt < 5; attempt++) {
       if (!this.currentLeader) {
         await this.discoverLeader();
         if (!this.currentLeader) {
-          console.log('[GATEWAY] No leader available, retrying...');
-          await new Promise(r => setTimeout(r, 200));
+          if (this.quorumLost) {
+            console.log('[GATEWAY] Cannot forward stroke - quorum lost');
+            return false;
+          }
+          // Wait longer on later attempts to allow election to complete
+          const delay = attempt < 2 ? 200 : 400;
+          console.log(`[GATEWAY] No leader available (attempt ${attempt + 1}/5), waiting ${delay}ms for election...`);
+          await new Promise(r => setTimeout(r, delay));
           continue;
         }
       }
@@ -108,7 +151,7 @@ class Gateway {
         await axios.post(
           `http://${this.currentLeader}/client-stroke`,
           { stroke: msg, roomId },
-          { timeout: 200 }
+          { timeout: 500 }  // Increased timeout from 200ms to 500ms
         );
         return true;
       } catch (e) {
@@ -117,7 +160,7 @@ class Gateway {
       }
     }
 
-    console.error('[GATEWAY] Failed to forward stroke after 3 attempts');
+    console.error('[GATEWAY] Failed to forward stroke after 5 attempts');
     return false;
   }
 
@@ -178,7 +221,12 @@ class Gateway {
           if (!client) return;
           msg.push(client.playerId);
           console.log(`[GATEWAY] Forwarding STROKE from ${client.playerId} to leader`);
-          await this.forwardToLeader(msg, client.roomId);
+          const success = await this.forwardToLeader(msg, client.roomId);
+          
+          // If forward failed due to quorum loss, optionally notify client
+          if (!success && this.quorumLost) {
+            console.log(`[GATEWAY] Stroke from ${client.playerId} dropped - cluster unavailable`);
+          }
         }
       } catch (e) {
         console.error('[GATEWAY] Error handling message:', e);

@@ -1,5 +1,31 @@
 import express from 'express';
 import axios from 'axios';
+import http from 'http';
+import https from 'https';
+
+// Configure axios to reuse connections and prevent socket listener leaks
+const httpAgent = new http.Agent({ 
+  keepAlive: true,
+  maxSockets: 50,
+  maxFreeSockets: 10,
+  timeout: 60000,
+  keepAliveMsecs: 1000
+});
+
+const httpsAgent = new https.Agent({ 
+  keepAlive: true,
+  maxSockets: 50,
+  maxFreeSockets: 10,
+  timeout: 60000,
+  keepAliveMsecs: 1000
+});
+
+// Increase max listeners to handle concurrent requests
+httpAgent.setMaxListeners(50);
+httpsAgent.setMaxListeners(50);
+
+axios.defaults.httpAgent = httpAgent;
+axios.defaults.httpsAgent = httpsAgent;
 
 const REPLICA_ID = process.env.REPLICA_ID || 'replica1';
 const PORT = parseInt(process.env.PORT || '3001');
@@ -268,7 +294,7 @@ class RaftNode {
           await axios.post(
             `${GATEWAY_URL}/commit`,
             { roomId: entry.roomId, stroke: entry.stroke },
-            { timeout: 200 }
+            { timeout: 5000 }
           );
         } catch (e) {
           console.error(`[${REPLICA_ID}] Failed to notify gateway for index ${this.lastApplied}:`, e);

@@ -77,7 +77,6 @@ export const useStore = create<DrawState>((set, get) => ({
           get().remoteStrokesQueue.push(msg);
         }
       }
-      // Ignore legacy DRAW_START / DRAW_MOVE / DRAW_END
     };
     
     set({ ws, roomId, playerId, remoteStrokesQueue: [], sessionId: get().sessionId + 1 });

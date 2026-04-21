@@ -165,7 +165,6 @@ export const Canvas = () => {
             drawStroke(ctx, points, color, width);
           }
         }
-        // DRAW_START / DRAW_MOVE / DRAW_END are legacy — ignore silently
       }
 
       animId = requestAnimationFrame(renderLoop);
