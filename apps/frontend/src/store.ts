@@ -50,7 +50,7 @@ export const useStore = create<DrawState>((set, get) => ({
         setTimeout(() => {
           const currentRoomId = get().roomId;
           if (currentRoomId) {
-            connect(currentRoomId);
+            get().connect(currentRoomId);
           }
         }, 2000);
       }
