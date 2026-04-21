@@ -53,7 +53,7 @@ Think of it like a group of three judges who must agree (majority = 2 out of 3) 
  Browser Tab 1 ──┐
  Browser Tab 2 ──┤──► GATEWAY (port 8080) ──► RAFT LEADER ──► Followers
  Browser Tab 3 ──┘         ▲                       │
-                            └───────────────────────┘
+                           └───────────────────────┘
                               committed stroke broadcast
 ```
 
