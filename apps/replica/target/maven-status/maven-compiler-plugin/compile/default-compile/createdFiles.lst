@@ -1,0 +1,8 @@
+com\scraw\replica\ReplicaServer$RaftNode$AppendRequest.class
+com\scraw\replica\ReplicaServer.class
+com\scraw\replica\ReplicaServer$AppendEntriesResponse.class
+com\scraw\replica\ReplicaServer$State.class
+com\scraw\replica\ReplicaServer$LogEntry.class
+com\scraw\replica\ReplicaServer$RaftNode.class
+com\scraw\replica\ReplicaServer$1.class
+com\scraw\replica\ReplicaServer$RaftNode$1.class

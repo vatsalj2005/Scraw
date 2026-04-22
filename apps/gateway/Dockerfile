@@ -1,14 +1,15 @@
-FROM node:20-alpine
+FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /app
 
-COPY package*.json ./
-COPY apps/gateway/package.json ./apps/gateway/
-COPY packages/shared/package.json ./packages/shared/
+COPY apps/gateway/pom.xml ./apps/gateway/pom.xml
+COPY apps/gateway/src ./apps/gateway/src
 
-RUN npm install
+RUN mvn -f apps/gateway/pom.xml -DskipTests package
 
-COPY packages/shared ./packages/shared
-COPY apps/gateway ./apps/gateway
+FROM eclipse-temurin:21-jre
+WORKDIR /app
 
-WORKDIR /app/apps/gateway
-CMD ["npx", "nodemon", "--watch", "src", "--ext", "ts", "--exec", "npx ts-node src/server.ts"]
+COPY --from=build /app/apps/gateway/target/gateway-1.0.0.jar /app/gateway.jar
+
+EXPOSE 8080 8081
+CMD ["java", "-jar", "/app/gateway.jar"]

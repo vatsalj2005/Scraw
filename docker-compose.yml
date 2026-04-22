@@ -7,11 +7,7 @@ services:
       - "8080:8080"
       - "8081:8081"
     environment:
-      - NODE_ENV=development
       - PORT=8080
-    volumes:
-      - ./apps/gateway/src:/app/apps/gateway/src
-      - ./packages:/app/packages
     networks:
       - scraw-network
     depends_on:
@@ -32,9 +28,6 @@ services:
       - PORT=3001
       - PEERS=replica2:3002,replica3:3003
       - GATEWAY_URL=http://gateway:8081
-    volumes:
-      - ./apps/replica1/src:/app/apps/replica/src
-      - ./packages:/app/packages
     networks:
       - scraw-network
 
@@ -49,9 +42,6 @@ services:
       - PORT=3002
       - PEERS=replica1:3001,replica3:3003
       - GATEWAY_URL=http://gateway:8081
-    volumes:
-      - ./apps/replica2/src:/app/apps/replica/src
-      - ./packages:/app/packages
     networks:
       - scraw-network
 
@@ -66,9 +56,6 @@ services:
       - PORT=3003
       - PEERS=replica1:3001,replica2:3002
       - GATEWAY_URL=http://gateway:8081
-    volumes:
-      - ./apps/replica3/src:/app/apps/replica/src
-      - ./packages:/app/packages
     networks:
       - scraw-network
 
@@ -80,7 +67,6 @@ services:
       - "5173:5173"
     volumes:
       - ./apps/frontend/src:/app/apps/frontend/src
-      - ./packages:/app/packages
     environment:
       - VITE_WS_URL=ws://${HOST_IP}:8080
     networks:
