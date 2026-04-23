@@ -4,7 +4,7 @@ import { MsgType } from './protocol';
 
 const CANVAS_W = 1200;
 const CANVAS_H = 700;
-const STROKE_COLOR = '#1fe611';
+const STROKE_COLOR = '#ff0055';
 const STROKE_WIDTH = 3;
 
 export const Canvas = () => {

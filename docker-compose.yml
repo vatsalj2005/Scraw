@@ -15,8 +15,8 @@ services:
       - replica2
       - replica3
 
-  # Each replica has its own source folder (replica1/src, replica2/src, replica3/src).
-  # Editing one folder only reloads that container — the other two keep quorum alive.
+  # Three Java replica containers form the RAFT cluster.
+  # replica1/2/3 use the same base Java implementation with different env wiring.
   replica1:
     build:
       context: .

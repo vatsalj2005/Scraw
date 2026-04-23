@@ -1,14 +1,15 @@
-FROM node:20-alpine
+FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /app
 
-COPY package*.json ./
-COPY apps/replica/package.json ./apps/replica/
-COPY packages/shared/package.json ./packages/shared/
+COPY apps/replica/pom.xml ./apps/replica/pom.xml
+COPY apps/replica/src ./apps/replica/src
 
-RUN npm install
+RUN mvn -f apps/replica/pom.xml -DskipTests package
 
-COPY packages/shared ./packages/shared
-COPY apps/replica ./apps/replica
+FROM eclipse-temurin:21-jre
+WORKDIR /app
 
-WORKDIR /app/apps/replica
-CMD ["npx", "nodemon", "--watch", "src", "--ext", "ts", "--exec", "npx ts-node src/server.ts"]
+COPY --from=build /app/apps/replica/target/replica-1.0.0.jar /app/replica.jar
+
+EXPOSE 3001
+CMD ["java", "-jar", "/app/replica.jar"]
